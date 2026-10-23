@@ -44,3 +44,7 @@ npm test                                   # lógica pura (node --test)
 gjs -m src/helper/thumb.js <captura.png>   # solo la ventanita (arrastre, clic, menú); eventos por stdout
 tools/nested-test.sh 25                    # sesión de GNOME Shell sin pantalla y aislada, con la sonda de tools/
 ```
+
+## Licencia
+
+GPL-2.0-or-later. Ver [LICENSE](LICENSE).

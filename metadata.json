@@ -3,7 +3,10 @@
   "name": "Screenshot MacTahoe",
   "description": "Miniatura flotante tras cada captura, al estilo macOS: arrástrala a cualquier app o ábrela en Gradia para marcarla.",
   "version": 1,
-  "url": "",
-  "shell-version": ["49", "50"],
+  "url": "https://github.com/KevinChumbay/screenshot-mactahoe",
+  "shell-version": [
+    "49",
+    "50"
+  ],
   "settings-schema": "org.gnome.shell.extensions.screenshot-mactahoe"
 }
