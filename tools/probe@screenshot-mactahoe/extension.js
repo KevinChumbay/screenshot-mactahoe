@@ -62,6 +62,15 @@ export default class Probe extends Extension {
       this._double(src);
       return;
     }
+    if (GLib.getenv("PROBE_SCENARIO") === "slow") {
+      for (const ms of [5000, 10000, 20000, 30000])
+        later(ms, () => log(`lento t=${ms} titulos=${global.get_window_actors().map(a => a.meta_window.get_title()).join("|")}`));
+      return;
+    }
+    if (GLib.getenv("PROBE_SCENARIO") === "swipe") {
+      this._swipe(src);
+      return;
+    }
     later(5000, () => {
       Main.screenshotUI.emit("screenshot-taken", imports.gi.Gio.File.new_for_path(src));
       log("captura simulada");
@@ -136,6 +145,38 @@ export default class Probe extends Extension {
       });
     }
     later(8000, () => log("FIN"));
+  }
+
+  // Deslizamiento simulado: el fondo con ✕ aparece detrás, se arma y se va.
+  _swipe(src) {
+    const client = () => Main.extensionManager.lookup("screenshot-mactahoe@kevin")?.stateObj._thumb;
+    const reveal = () => global.window_group.get_children().find(a => a.has_style_class_name?.("smt-swipe-reveal"));
+    const report = tag => {
+      const r = reveal();
+      const w = thumbWindow();
+      const actor = w?.get_compositor_private();
+      const kids = global.window_group.get_children();
+      const ext = Main.extensionManager.lookup("screenshot-mactahoe@kevin")?.stateObj;
+      log(`swipe ${tag} estado=${ext?._state?.phase} vivas=${ext?._thumb?._live.size} titulos=${global.get_window_actors().map(a => a.meta_window.get_title()).join("|")}`);
+      log(`swipe ${tag} fondo=${r ? `${r.x},${r.y} ${r.width}x${r.height} op=${r.opacity} armado=${r.get_style_pseudo_class()?.includes("armed") ?? false} debajo=${kids.indexOf(r) < kids.indexOf(actor)}` : "ninguno"} ventana=${w ? w.get_frame_rect().x : "-"}+${actor?.translation_x ?? "-"}`);
+    };
+    later(5000, () => Main.screenshotUI.emit("screenshot-taken", imports.gi.Gio.File.new_for_path(src)));
+    later(9000, () => {
+      const c = client();
+      c._onMessage(c._proc, { event: "swipe", dx: 40 });
+      report("dx=40");
+      c._onMessage(c._proc, { event: "swipe", dx: 90 });
+      report("dx=90");
+      c._onMessage(c._proc, { event: "swipe", dx: 0 });
+    });
+    later(9500, () => report("dx=0+500ms"));
+    later(10000, () => {
+      const c = client();
+      c._onMessage(c._proc, { event: "swipe", dx: 100 });
+      c._onMessage(c._proc, { event: "dismissed" });
+    });
+    later(10600, () => report("descartada+600ms"));
+    later(11000, () => log("FIN"));
   }
 
   disable() {}

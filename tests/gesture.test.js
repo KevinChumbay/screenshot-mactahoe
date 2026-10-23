@@ -34,3 +34,18 @@ test("hacia arriba, la izquierda o en diagonal es arrastrar el archivo", () => {
   assert.equal(classifyMove(-20, 0), "drag");
   assert.equal(classifyMove(15, 15), "drag");
 });
+
+import { swipeReveal } from "../lib/gesture.js";
+
+test("sin deslizar el fondo no se ve", () => {
+  assert.deepEqual(swipeReveal(0), { opacity: 0, armed: false });
+});
+
+test("el fondo se intensifica al deslizar", () => {
+  assert.deepEqual(swipeReveal(40), { opacity: 128, armed: false });
+});
+
+test("pasado el punto de descarte el fondo está lleno y la ✕ marcada", () => {
+  assert.deepEqual(swipeReveal(81), { opacity: 255, armed: true });
+  assert.deepEqual(swipeReveal(200), { opacity: 255, armed: true });
+});

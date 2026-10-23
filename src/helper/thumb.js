@@ -10,14 +10,13 @@ import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import System from "system";
 
-import { fitThumb } from "../../lib/placement.js";
+import { fitThumb, THUMB_SHADOW as SHADOW } from "../../lib/placement.js";
 import { classifyMove, isDismissSwipe } from "../../lib/gesture.js";
 import { encode, decodeLines } from "../../lib/protocol.js";
 import { timerMayRun } from "../../lib/timer.js";
 import { dragContent } from "./content.js";
 
 const VISIBLE_MS = 6000;
-const SHADOW = 24;
 const FADE_MS = 150;
 // Tras soltar, el destino (sobre todo flatpak/snap vía portal) puede seguir
 // leyendo el archivo: la ventanita espera un poco antes de salir.

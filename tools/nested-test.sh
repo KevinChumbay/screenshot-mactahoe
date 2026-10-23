@@ -36,6 +36,6 @@ export PROBE_SCENARIO="${PROBE_SCENARIO:-}" PROBE_GAP="${PROBE_GAP:-30}"
 dbus-run-session -- bash -c '
   gsettings set org.gnome.shell disable-user-extensions false
   gsettings set org.gnome.shell enabled-extensions "[\"screenshot-mactahoe@kevin\", \"probe@screenshot-mactahoe\", \"grand-theft-focus@zalckos.github.com\"]"
-  timeout '"$SECS"' gnome-shell --headless --virtual-monitor 1920x1080 --wayland > "'"$TMPROOT"'/shell.log" 2>&1 || true
+  timeout '"$SECS"' gnome-shell --headless --virtual-monitor 1920x1080 --wayland --no-x11 > "'"$TMPROOT"'/shell.log" 2>&1 || true
 '
 echo "$TMPROOT/shell.log"

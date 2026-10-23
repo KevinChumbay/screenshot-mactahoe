@@ -1,0 +1,16 @@
+/* Fondo que asoma detrás de la miniatura al deslizarla para descartarla. */
+.smt-swipe-reveal {
+  background-color: rgba(44, 44, 46, 0.94);
+  border-radius: 12px;
+  padding-left: 18px;
+}
+
+.smt-swipe-reveal-icon {
+  icon-size: 18px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.smt-swipe-reveal:armed .smt-swipe-reveal-icon {
+  icon-size: 24px;
+  color: #ffffff;
+}

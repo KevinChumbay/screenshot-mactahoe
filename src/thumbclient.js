@@ -6,15 +6,18 @@ import Clutter from "gi://Clutter";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Meta from "gi://Meta";
+import St from "gi://St";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 
-import { cornerPosition, pickMonitor } from "../lib/placement.js";
+import { swipeReveal } from "../lib/gesture.js";
+import { cornerPosition, pickMonitor, THUMB_SHADOW } from "../lib/placement.js";
 import { encode, decodeLines } from "../lib/protocol.js";
 
 const ENTER_MS = 220;
 const LEAVE_MS = 150;
 const FOCUS_GUARD_MS = 1000;
 const QUIT_GRACE_MS = 500;
+const REVEAL_FADE_MS = 150;
 
 const FLOW_EVENTS = {
   click: "openGradia",
@@ -99,6 +102,8 @@ export class ThumbClient {
     this._proc = null;
     for (const proc of this._live) {
       proc.terminal = true;
+      proc.reveal?.destroy();
+      proc.reveal = null;
       if (proc.quitTimer)
         GLib.source_remove(proc.quitTimer);
       proc.quitTimer = 0;
@@ -151,6 +156,7 @@ export class ThumbClient {
       return;
     case "swipe":
       this._actor(proc)?.set_translation(msg.dx, 0, 0);
+      this._updateReveal(proc, msg.dx);
       return;
     case "menu":
       if (TERMINAL_MENU.has(msg.action))
@@ -177,6 +183,7 @@ export class ThumbClient {
 
   _onExit(proc) {
     this._live.delete(proc);
+    this._hideReveal(proc);
     if (proc.quitTimer) {
       GLib.source_remove(proc.quitTimer);
       proc.quitTimer = 0;
@@ -239,6 +246,55 @@ export class ThumbClient {
     const actor = this._actor(proc);
     if (actor && proc.size)
       actor.ease({ translation_x: proc.size.width + 16, duration: LEAVE_MS, mode: Clutter.AnimationMode.EASE_IN_QUAD });
+    this._hideReveal(proc, LEAVE_MS);
+  }
+
+  // Fondo con ✕ que asoma detrás de la miniatura al deslizarla a la derecha.
+  // Queda quieto en el lugar de la miniatura mientras la ventana se desplaza.
+  _updateReveal(proc, dx) {
+    const { opacity, armed } = swipeReveal(dx);
+    if (opacity === 0) {
+      this._hideReveal(proc);
+      return;
+    }
+    const actor = this._actor(proc);
+    if (!actor)
+      return;
+    if (!proc.reveal) {
+      const rect = proc.win.get_frame_rect();
+      proc.reveal = new St.Bin({
+        style_class: "smt-swipe-reveal",
+        x_align: Clutter.ActorAlign.START,
+        y_align: Clutter.ActorAlign.CENTER,
+        child: new St.Icon({ icon_name: "window-close-symbolic", style_class: "smt-swipe-reveal-icon" }),
+        x: rect.x + THUMB_SHADOW,
+        y: rect.y + THUMB_SHADOW,
+        width: rect.width - THUMB_SHADOW * 2,
+        height: rect.height - THUMB_SHADOW * 2,
+      });
+      global.window_group.add_child(proc.reveal);
+      global.window_group.set_child_below_sibling(proc.reveal, actor);
+    }
+    proc.reveal.remove_all_transitions();
+    proc.reveal.opacity = opacity;
+    if (armed)
+      proc.reveal.add_style_pseudo_class("armed");
+    else
+      proc.reveal.remove_style_pseudo_class("armed");
+  }
+
+  _hideReveal(proc, delayMs = 0) {
+    const reveal = proc.reveal;
+    if (!reveal)
+      return;
+    proc.reveal = null;
+    reveal.ease({
+      opacity: 0,
+      delay: delayMs,
+      duration: REVEAL_FADE_MS,
+      mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+      onStopped: () => reveal.destroy(),
+    });
   }
 
   _actor(proc) {
