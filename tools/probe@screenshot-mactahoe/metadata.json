@@ -1,0 +1,6 @@
+{
+  "uuid": "probe@screenshot-mactahoe",
+  "name": "Sonda de Screenshot MacTahoe",
+  "description": "Solo para pruebas en sesión anidada: simula capturas y registra lo que ve.",
+  "shell-version": ["49", "50"]
+}

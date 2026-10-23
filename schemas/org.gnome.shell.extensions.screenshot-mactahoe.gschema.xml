@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.screenshot-mactahoe"
+          path="/org/gnome/shell/extensions/screenshot-mactahoe/">
+    <key name="monitor" type="s">
+      <default>"primary"</default>
+      <summary>Monitor de la miniatura</summary>
+      <description>"primary" (principal), "pointer" (donde está el puntero) o el nombre de un conector, como "HDMI-1".</description>
+    </key>
+  </schema>
+</schemalist>
