@@ -63,7 +63,9 @@ class Thumb {
 
     const css = new Gtk.CssProvider();
     css.load_from_path(GLib.build_filenamev([GLib.path_get_dirname(import.meta.url.replace("file://", "")), "thumb.css"]));
-    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+    // Por encima de PRIORITY_USER: el tema del usuario (~/.config/gtk-4.0/gtk.css)
+    // le pondría fondo a la ventana y se vería un recuadro alrededor de la miniatura.
+    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
 
     const picture = new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.COVER, can_shrink: true });
     picture.set_size_request(width, height);
@@ -81,6 +83,7 @@ class Thumb {
       default_width: this._size.width,
       default_height: this._size.height,
     });
+    this._window.remove_css_class("background");
     this._window.add_css_class("thumb-window");
     const styles = Adw.StyleManager.get_default();
     const syncDark = () => {
