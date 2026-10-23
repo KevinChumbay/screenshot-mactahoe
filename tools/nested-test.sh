@@ -31,6 +31,7 @@ done
 PROBE_IMAGE="$TMPROOT/captura.png"
 cp "$(ls -t "$HOME/Imágenes/Capturas de pantalla/"*.png | head -1)" "$PROBE_IMAGE"
 export PROBE_IMAGE
+export PROBE_SCENARIO="${PROBE_SCENARIO:-}" PROBE_GAP="${PROBE_GAP:-30}"
 
 dbus-run-session -- bash -c '
   gsettings set org.gnome.shell disable-user-extensions false

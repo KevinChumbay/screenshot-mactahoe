@@ -11,12 +11,17 @@ import Gtk from "gi://Gtk?version=4.0";
 import System from "system";
 
 import { fitThumb } from "../../lib/placement.js";
-import { isDismissSwipe } from "../../lib/gesture.js";
+import { classifyMove, isDismissSwipe } from "../../lib/gesture.js";
 import { encode, decodeLines } from "../../lib/protocol.js";
+import { timerMayRun } from "../../lib/timer.js";
+import { dragContent } from "./content.js";
 
 const VISIBLE_MS = 6000;
 const SHADOW = 24;
 const FADE_MS = 150;
+// Tras soltar, el destino (sobre todo flatpak/snap vía portal) puede seguir
+// leyendo el archivo: la ventanita espera un poco antes de salir.
+const DROP_GRACE_MS = 1000;
 const TERMINAL = new Set(["click", "dismissed", "expired", "dropped", "error"]);
 
 const stdout = new GioUnix.OutputStream({ fd: 1, closeFd: false });
@@ -36,7 +41,10 @@ class Thumb {
     this._file = Gio.File.new_for_path(path);
     this._finished = false;
     this._timer = 0;
-    this._swiping = false;
+    this._move = "none";
+    this._hovering = false;
+    this._dragging = false;
+    this._menuOpen = false;
     this._dragCancelled = false;
   }
 
@@ -102,35 +110,38 @@ class Thumb {
 
   _setupHover() {
     const motion = new Gtk.EventControllerMotion();
-    motion.connect("enter", () => this._stopTimer());
+    motion.connect("enter", () => {
+      this._hovering = true;
+      this._stopTimer();
+    });
     motion.connect("leave", () => {
-      if (!this._menuOpen)
-        this._restartTimer();
+      this._hovering = false;
+      this._restartTimer();
     });
     this._window.add_controller(motion);
   }
 
   _setupGestures() {
     // Arrastre horizontal hacia la derecha = descartar; cualquier otra
-    // dirección arrastra el archivo. Se decide con el primer movimiento.
+    // dirección arrastra el archivo; sin moverse es un clic. Se decide con el
+    // primer movimiento y no se olvida hasta la próxima pulsación.
     const swipe = new Gtk.GestureDrag({ button: Gdk.BUTTON_PRIMARY });
     swipe.connect("drag-begin", () => {
-      this._swiping = false;
+      this._move = "none";
       this._swipeStart = GLib.get_monotonic_time();
     });
     swipe.connect("drag-update", (_g, dx, dy) => {
-      if (!this._swiping && dx > 8 && Math.abs(dx) > Math.abs(dy) * 1.5)
-        this._swiping = true;
-      if (this._swiping) {
+      if (this._move === "none")
+        this._move = classifyMove(dx, dy);
+      if (this._move === "swipe") {
         const shift = Math.max(0, dx);
         this._frame.set_opacity(Math.max(0.3, 1 - shift / 240));
         send({ event: "swipe", dx: Math.round(shift) });
       }
     });
     swipe.connect("drag-end", (_g, dx) => {
-      if (!this._swiping)
+      if (this._move !== "swipe")
         return;
-      this._swiping = false;
       const secs = Math.max(0.001, (GLib.get_monotonic_time() - this._swipeStart) / 1e6);
       if (isDismissSwipe(dx, dx / secs)) {
         this._finish("dismissed");
@@ -143,14 +154,16 @@ class Thumb {
 
     const source = new Gtk.DragSource({ actions: Gdk.DragAction.COPY });
     source.connect("prepare", () => {
-      if (this._swiping)
+      if (this._move === "none") {
+        const [, dx, dy] = swipe.get_offset();
+        this._move = classifyMove(dx, dy) === "swipe" ? "swipe" : "drag";
+      }
+      if (this._move === "swipe")
         return null;
-      return Gdk.ContentProvider.new_union([
-        Gdk.ContentProvider.new_for_value(this._file),
-        Gdk.ContentProvider.new_for_bytes("image/png", this._bytes),
-      ]);
+      return dragContent(this._file, this._bytes);
     });
     source.connect("drag-begin", () => {
+      this._dragging = true;
       this._dragCancelled = false;
       this._stopTimer();
       const [w, h] = [this._size.width - SHADOW * 2, this._size.height - SHADOW * 2];
@@ -162,18 +175,19 @@ class Thumb {
       return false;
     });
     source.connect("drag-end", () => {
+      this._dragging = false;
       if (this._dragCancelled) {
         this._frame.set_opacity(1);
         this._restartTimer();
       } else {
-        this._finish("dropped");
+        this._finish("dropped", DROP_GRACE_MS);
       }
     });
     this._frame.add_controller(source);
 
     const click = new Gtk.GestureClick({ button: Gdk.BUTTON_PRIMARY });
     click.connect("released", (_g, nPress) => {
-      if (nPress === 1 && !this._swiping)
+      if (nPress === 1 && this._move === "none")
         this._finish("click");
     });
     this._frame.add_controller(click);
@@ -251,7 +265,7 @@ class Thumb {
 
   _restartTimer() {
     this._stopTimer();
-    if (this._finished)
+    if (!timerMayRun({ finished: this._finished, dragging: this._dragging, menuOpen: this._menuOpen, hovering: this._hovering }))
       return;
     this._timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, VISIBLE_MS, () => {
       this._timer = 0;
@@ -274,13 +288,21 @@ class Thumb {
   }
 
   // Manda el evento terminal (si hay), se desvanece y sale.
-  _finish(event) {
+  _finish(event, delayMs = 0) {
     if (this._finished)
       return;
     this._finished = true;
     this._stopTimer();
     if (event && TERMINAL.has(event))
       send({ event });
+    if (delayMs > 0) {
+      this._window.set_opacity(0);
+      GLib.timeout_add(GLib.PRIORITY_DEFAULT, delayMs, () => {
+        this._app.quit();
+        return GLib.SOURCE_REMOVE;
+      });
+      return;
+    }
     const target = Adw.CallbackAnimationTarget.new(v => this._window.set_opacity(v));
     const fade = new Adw.TimedAnimation({
       widget: this._window, value_from: this._window.get_opacity(), value_to: 0,

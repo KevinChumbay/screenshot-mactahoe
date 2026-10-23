@@ -37,6 +37,8 @@ export class ThumbClient {
     this._settings = settings;
     this._onEvent = onEvent;
     this._proc = null;
+    // Todas las ventanitas vivas: una reemplazada puede crear su ventana después.
+    this._live = new Set();
     this._windowCreatedId = global.display.connect("window-created", (_d, win) => this._onWindowCreated(win));
     this._focusId = global.display.connect("notify::focus-window", () => this._guardFocus());
   }
@@ -72,6 +74,7 @@ export class ThumbClient {
       quitTimer: 0,
     };
     this._proc = proc;
+    this._live.add(proc);
     this._readEvents(proc);
     proc.subprocess.wait_async(null, () => this._onExit(proc));
   }
@@ -93,13 +96,16 @@ export class ThumbClient {
   destroy() {
     global.display.disconnect(this._windowCreatedId);
     global.display.disconnect(this._focusId);
-    const proc = this._proc;
     this._proc = null;
-    if (proc) {
+    for (const proc of this._live) {
       proc.terminal = true;
+      if (proc.quitTimer)
+        GLib.source_remove(proc.quitTimer);
+      proc.quitTimer = 0;
       proc.cancellable.cancel();
       proc.subprocess.force_exit();
     }
+    this._live.clear();
   }
 
   _write(proc, msg) {
@@ -170,6 +176,7 @@ export class ThumbClient {
   }
 
   _onExit(proc) {
+    this._live.delete(proc);
     if (proc.quitTimer) {
       GLib.source_remove(proc.quitTimer);
       proc.quitTimer = 0;
@@ -183,14 +190,19 @@ export class ThumbClient {
   }
 
   _onWindowCreated(win) {
-    const proc = this._proc;
-    if (!proc || proc.win || !proc.client.owns_window(win))
+    const proc = [...this._live].find(p => !p.win && p.client.owns_window(win));
+    if (!proc)
       return;
     proc.win = win;
     proc.createdAt = GLib.get_monotonic_time();
     win.hide_from_window_list();
     win.make_above();
     win.stick();
+    if (proc !== this._proc) {
+      // Ya reemplazada: que no se vea mientras se cierra.
+      win.get_compositor_private()?.hide();
+      return;
+    }
     // Mutter coloca la ventana al mostrarla por primera vez; moverla antes no sirve.
     const shownId = win.connect("shown", () => {
       win.disconnect(shownId);
@@ -236,8 +248,8 @@ export class ThumbClient {
   // grand-theft-focus le da el foco a las ventanas nuevas: si la miniatura lo
   // recibe justo al aparecer, se lo devolvemos a la ventana anterior.
   _guardFocus() {
-    const proc = this._proc;
-    if (!proc?.win || global.display.focus_window !== proc.win)
+    const proc = [...this._live].find(p => p.win && p.win === global.display.focus_window);
+    if (!proc)
       return;
     const sinceCreated = (GLib.get_monotonic_time() - proc.createdAt) / 1000;
     if (sinceCreated < FOCUS_GUARD_MS && proc.prevFocus && proc.prevFocus !== proc.win)

@@ -5,9 +5,19 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 
 import { copyName, staleFiles } from "../lib/cache.js";
+import { fileEventKind, initialWatch, stepWatch } from "../lib/gradiawatch.js";
 
 const APP_ID = "be.alexandervanhee.gradia";
 const WAIT_WINDOW_MS = 20000;
+const SAVE_WAIT_MS = 5000;
+
+const EVENT_NAMES = {
+  [Gio.FileMonitorEvent.CHANGES_DONE_HINT]: "changes-done-hint",
+  [Gio.FileMonitorEvent.DELETED]: "deleted",
+  [Gio.FileMonitorEvent.RENAMED]: "renamed",
+  [Gio.FileMonitorEvent.MOVED_IN]: "moved-in",
+  [Gio.FileMonitorEvent.MOVED_OUT]: "moved-out",
+};
 
 export function cacheDir() {
   return GLib.build_filenamev([GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES), ".screenshot-mactahoe"]);
@@ -16,10 +26,7 @@ export function cacheDir() {
 export class GradiaSession {
   constructor(onDone) {
     this._onDone = onDone;
-    this._windowCreatedId = 0;
-    this._unmanagedId = 0;
-    this._win = null;
-    this._timer = 0;
+    this._session = null;
   }
 
   start(source, editId) {
@@ -33,20 +40,36 @@ export class GradiaSession {
       return;
     }
 
-    this._windowCreatedId = global.display.connect("window-created", (_d, win) => {
-      if (this._win || !isGradia(win))
+    const session = { editId, copy, watch: initialWatch(), win: null, unmanagedId: 0, saveTimer: 0 };
+    this._session = session;
+
+    session.windowCreatedId = global.display.connect("window-created", (_d, win) => {
+      if (session.win || !isGradia(win))
         return;
-      this._win = win;
-      this._clearTimer();
-      this._unmanagedId = win.connect("unmanaged", () => {
-        this.cancel();
-        this._onDone({ editId, copy, copyExists: GLib.file_test(copy, GLib.FileTest.EXISTS) });
+      session.win = win;
+      session.unmanagedId = win.connect("unmanaged", () => {
+        win.disconnect(session.unmanagedId);
+        session.win = null;
+        session.unmanagedId = 0;
+        this._step(session, { type: "unmanaged" });
       });
+      this._step(session, { type: "windowCreated" });
     });
-    this._timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, WAIT_WINDOW_MS, () => {
-      this._timer = 0;
-      this.cancel();
-      this._onDone({ editId, timeout: true });
+
+    session.monitor = Gio.File.new_for_path(cacheDir()).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, null);
+    const copyBase = GLib.path_get_basename(copy);
+    session.monitorId = session.monitor.connect("changed", (_m, file, other, eventType) => {
+      const kind = fileEventKind(eventName(eventType), file?.get_basename() ?? null,
+        other?.get_basename() ?? null, copyBase);
+      if (kind === "saved")
+        this._step(session, { type: "fileSaved" });
+      else if (kind === "gone")
+        this._step(session, { type: "fileGone" });
+    });
+
+    session.windowTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, WAIT_WINDOW_MS, () => {
+      session.windowTimer = 0;
+      this._step(session, { type: "windowTimeout" });
       return GLib.SOURCE_REMOVE;
     });
 
@@ -60,25 +83,48 @@ export class GradiaSession {
   }
 
   cancel() {
-    this._clearTimer();
-    if (this._windowCreatedId) {
-      global.display.disconnect(this._windowCreatedId);
-      this._windowCreatedId = 0;
+    const session = this._session;
+    if (!session)
+      return;
+    this._session = null;
+    for (const timer of [session.windowTimer, session.saveTimer]) {
+      if (timer)
+        GLib.source_remove(timer);
     }
-    if (this._win && this._unmanagedId)
-      this._win.disconnect(this._unmanagedId);
-    this._unmanagedId = 0;
-    this._win = null;
+    global.display.disconnect(session.windowCreatedId);
+    if (session.win && session.unmanagedId)
+      session.win.disconnect(session.unmanagedId);
+    session.monitor.disconnect(session.monitorId);
+    session.monitor.cancel();
   }
 
   destroy() {
     this.cancel();
   }
 
-  _clearTimer() {
-    if (this._timer) {
-      GLib.source_remove(this._timer);
-      this._timer = 0;
+  _step(session, event) {
+    if (session !== this._session)
+      return;
+    const { watch, result } = stepWatch(session.watch, event);
+    session.watch = watch;
+    if (result) {
+      this.cancel();
+      this._onDone(result.timeout
+        ? { editId: session.editId, timeout: true }
+        : { editId: session.editId, copy: session.copy, copyExists: result.copyExists });
+      return;
+    }
+    // Ventana cerrada sin guardado todavía: Gradia guarda justo después; si no
+    // llega nada en SAVE_WAIT_MS, se decide por si la copia existe.
+    if (event.type === "unmanaged" && watch.phase === "closing" && !session.saveTimer) {
+      session.saveTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SAVE_WAIT_MS, () => {
+        session.saveTimer = 0;
+        this._step(session, { type: "saveTimeout", exists: GLib.file_test(session.copy, GLib.FileTest.EXISTS) });
+        return GLib.SOURCE_REMOVE;
+      });
+    } else if (event.type === "windowCreated" && session.saveTimer) {
+      GLib.source_remove(session.saveTimer);
+      session.saveTimer = 0;
     }
   }
 
@@ -90,6 +136,10 @@ export class GradiaSession {
     Gio.File.new_for_path(source).copy(Gio.File.new_for_path(copy), Gio.FileCopyFlags.NONE, null, null);
     return copy;
   }
+}
+
+function eventName(eventType) {
+  return EVENT_NAMES[eventType] ?? null;
 }
 
 function isGradia(win) {

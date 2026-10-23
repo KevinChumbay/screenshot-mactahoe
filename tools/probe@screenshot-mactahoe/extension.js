@@ -58,6 +58,10 @@ export default class Probe extends Extension {
       w?.activate(global.get_current_time());
       log(`foco-antes=${global.display.focus_window?.get_title()}`);
     });
+    if (GLib.getenv("PROBE_SCENARIO") === "double") {
+      this._double(src);
+      return;
+    }
     later(5000, () => {
       Main.screenshotUI.emit("screenshot-taken", imports.gi.Gio.File.new_for_path(src));
       log("captura simulada");
@@ -102,6 +106,36 @@ export default class Probe extends Extension {
       describe("tras-rehabilitar");
       log("FIN");
     });
+  }
+
+  // Dos capturas seguidas: la ventanita reemplazada no debe quedar visible en
+  // Alt+Tab ni quitar el foco mientras se cierra.
+  _double(src) {
+    const seen = new Set();
+    this._seenId = global.display.connect("window-created", (_d, w) => {
+      if (w.get_title() === "Miniatura de captura" || w.get_wm_class()?.includes("ScreenshotMacTahoe"))
+        seen.add(w);
+    });
+    later(4000, () => {
+      const w = global.get_window_actors().map(a => a.meta_window).find(x => x.get_title() === "Ventana de trabajo");
+      w?.activate(global.get_current_time());
+    });
+    later(5000, () => {
+      const file = imports.gi.Gio.File.new_for_path(src);
+      Main.screenshotUI.emit("screenshot-taken", file);
+      later(Number(GLib.getenv("PROBE_GAP") ?? 30), () => Main.screenshotUI.emit("screenshot-taken", file));
+    });
+    // Muestrea varias veces mientras la primera ventanita se cierra.
+    for (const ms of [5300, 5600, 6000, 6500, 7500]) {
+      later(ms, () => {
+        const tab = global.display.get_tab_list(Meta.TabList.NORMAL, null);
+        const thumbs = global.get_window_actors().map(a => a.meta_window)
+          .filter(w => w.get_title() === "Miniatura de captura" || seen.has(w));
+        const bad = thumbs.filter(w => tab.includes(w) || !w.is_above());
+        log(`doble t=${ms} miniaturas=${thumbs.length} malas=${bad.length} foco=${global.display.focus_window?.get_title()}`);
+      });
+    }
+    later(8000, () => log("FIN"));
   }
 
   disable() {}
