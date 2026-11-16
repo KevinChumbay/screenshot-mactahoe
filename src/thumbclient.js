@@ -302,11 +302,19 @@ export class ThumbClient {
   }
 
   // grand-theft-focus le da el foco a las ventanas nuevas: si la miniatura lo
-  // recibe justo al aparecer, se lo devolvemos a la ventana anterior.
+  // recibe justo al aparecer, se lo devolvemos a la última ventana que tuvo el
+  // foco. Esa se actualiza con cada cambio, también los de después de la
+  // captura (cambiarse de app antes de que salga la miniatura).
   _guardFocus() {
-    const proc = [...this._live].find(p => p.win && p.win === global.display.focus_window);
-    if (!proc)
+    const focus = global.display.focus_window;
+    const proc = [...this._live].find(p => p.win && p.win === focus);
+    if (!proc) {
+      if (focus) {
+        for (const p of this._live)
+          p.prevFocus = focus;
+      }
       return;
+    }
     const sinceCreated = (GLib.get_monotonic_time() - proc.createdAt) / 1000;
     if (sinceCreated < FOCUS_GUARD_MS && proc.prevFocus && proc.prevFocus !== proc.win)
       proc.prevFocus.activate(global.get_current_time());

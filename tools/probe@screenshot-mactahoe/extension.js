@@ -67,6 +67,10 @@ export default class Probe extends Extension {
         later(ms, () => log(`lento t=${ms} titulos=${global.get_window_actors().map(a => a.meta_window.get_title()).join("|")}`));
       return;
     }
+    if (GLib.getenv("PROBE_SCENARIO") === "switch") {
+      this._switch(src);
+      return;
+    }
     if (GLib.getenv("PROBE_SCENARIO") === "swipe") {
       this._swipe(src);
       return;
@@ -115,6 +119,30 @@ export default class Probe extends Extension {
       describe("tras-rehabilitar");
       log("FIN");
     });
+  }
+
+  // Captura y cambio inmediato a otra ventana, antes de que salga la miniatura:
+  // al aparecer, la miniatura no debe devolver el foco a la ventana de la captura.
+  _switch(src) {
+    const byTitle = title => global.get_window_actors().map(a => a.meta_window).find(x => x.get_title() === title);
+    later(1500, () => {
+      const launcher = new imports.gi.Gio.SubprocessLauncher({ flags: 0 });
+      this._other = Meta.WaylandClient.new_subprocess(global.context, launcher, ["gjs", "-c",
+        'imports.gi.versions.Gtk="4.0";const{Gtk,GLib}=imports.gi;Gtk.init();' +
+        'const w=new Gtk.Window({title:"Otra app"});w.present();new GLib.MainLoop(null,false).run();']);
+    });
+    later(5000, () => {
+      log(`switch foco-captura=${global.display.focus_window?.get_title()}`);
+      Main.screenshotUI.emit("screenshot-taken", imports.gi.Gio.File.new_for_path(src));
+      byTitle("Otra app")?.activate(global.get_current_time());
+      log(`switch foco-cambiado=${global.display.focus_window?.get_title()} miniatura=${!!thumbWindow()}`);
+    });
+    later(8000, () => {
+      describe("switch tras-miniatura");
+      const focus = global.display.focus_window?.get_title();
+      log(`switch foco-final=${focus} ok=${focus === "Otra app"}`);
+    });
+    later(9000, () => log("FIN"));
   }
 
   // Dos capturas seguidas: la ventanita reemplazada no debe quedar visible en
